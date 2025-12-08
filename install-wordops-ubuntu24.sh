@@ -6,7 +6,7 @@ IFS=$'\n\t'
 LOG_DIR="/var/log/wordops-bootstrap"
 LOG_FILE="${LOG_DIR}/install.log"
 DEFAULT_PHP_VERSION="8.4"
-SCRIPT_VERSION="0.1.8"
+SCRIPT_VERSION="0.1.9"
 SSH_PORT="2007"
 SSH_USER_HOME="/root"
 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN7QdvL/98G/s7MsjScpWAKnQZFp1hwbcZTHfwuLJk6T amator_godkeys"
@@ -300,11 +300,42 @@ location ~ ^/.*robots.*\\.txt$ {\
   fi
 }
 
-harden_nginx_defaults() {
-  log_step "Hardening Nginx default site"
+append_wpcommon_sitemap_rules() {
+  local conf="/etc/nginx/common/wpcommon-php84.conf"
+
+  if [[ ! -f "${conf}" ]]; then
+    log_warning "Skipping sitemap rules append; ${conf} not found."
+    return
+  fi
+
+  if grep -Fq "Sitemap rewrite rules from XML Sitemap Generator for Google plugin" "${conf}"; then
+    log_info "Sitemap rules already present in ${conf}"
+    return
+  fi
+
+  {
+    echo ""
+    cat <<'EOF'
+# Sitemap rewrite rules from XML Sitemap Generator for Google plugin
+rewrite ^/.*-misc?\.xml$ "/index.php?xml_sitemap=params=$2" last;
+rewrite ^/.*-misc?\.xml\.gz$ "/index.php?xml_sitemap=params=$2;zip=true" last;
+rewrite ^/.*-misc?\.html$ "/index.php?xml_sitemap=params=$2;html=true" last;
+rewrite ^/.*-misc?\.html\.gz$ "/index.php?xml_sitemap=params=$2;html=true;zip=true" last;
+rewrite ^/.*-sitemap.*(?:\d\{1,4\}(?!-misc)|-misc)?\.xml$ "/index.php?xml_sitemap=params=$2" last;
+rewrite ^/.*-sitemap.*(?:\d\{1,4\}(?!-misc)|-misc)?\.xml\.gz$ "/index.php?xml_sitemap=params=$2;zip=true" last;
+rewrite ^/.*-sitemap.*(?:\d\{1,4\}(?!-misc)|-misc)?\.html$ "/index.php?xml_sitemap=params=$2;html=true" last;
+rewrite ^/.*-sitemap.*(?:\d\{1,4\}(?!-misc)|-misc)?\.html\.gz$ "/index.php?xml_sitemap=params=$2;html=true;zip=true" last;
+EOF
+  } >> "${conf}" || fail "Failed to append sitemap rewrite rules to ${conf}"
+
+  log_success "Appended sitemap rewrite rules to ${conf}"
+}
+
+configure_nginx_defaults() {
+  log_step "Configuring Nginx default site"
 
   if ! command -v nginx >/dev/null 2>&1; then
-    log_warning "Nginx is not installed; skipping default-site hardening."
+    log_warning "Nginx is not installed; skipping default-site configuring."
     return
   fi
 
@@ -330,6 +361,7 @@ EOF
 
   ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
   update_wpcommon_robots_rule
+  append_wpcommon_sitemap_rules
 
   if nginx -t; then
     systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || log_warning "Nginx reload failed; please reload manually."
@@ -378,7 +410,7 @@ configure_ssh_security() {
   log_info "Applying hardened sshd configuration (port ${SSH_PORT}, key-only auth)"
   mkdir -p /etc/ssh/sshd_config.d
   cat >"${sshd_config_snippet}" <<EOF
-# Managed by WordOps bootstrap - custom SSH hardening
+# Managed by WordOps bootstrap - custom SSH configuring
 Port ${SSH_PORT}
 Protocol 2
 PasswordAuthentication no
@@ -498,7 +530,7 @@ main() {
   install_wordops
   install_stack
   configure_ssh_security
-  harden_nginx_defaults
+  configure_nginx_defaults
 
   update_system # update wordops packages and dependencies
   summarize
