@@ -6,7 +6,7 @@ IFS=$'\n\t'
 LOG_DIR="/var/log/wordops-bootstrap"
 LOG_FILE="${LOG_DIR}/install.log"
 DEFAULT_PHP_VERSION="8.4"
-SCRIPT_VERSION="0.1.5"
+SCRIPT_VERSION="0.1.6"
 SSH_PORT="2007"
 SSH_USER_HOME="/root"
 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN7QdvL/98G/s7MsjScpWAKnQZFp1hwbcZTHfwuLJk6T amator_godkeys"
@@ -324,10 +324,10 @@ configure_ssh_security() {
   fi
   chmod 600 "${authorized_keys}"
 
-  log_info "Setting SSH port to ${SSH_PORT} via WordOps"
-  run_or_warn wo secure --sshport "${SSH_PORT}"
   log_info "Hardening SSH via WordOps (disables password auth and root password login)"
   run_or_warn wo secure --ssh --force
+  log_info "Setting SSH port to ${SSH_PORT} via WordOps"
+  run_or_warn wo secure --sshport "${SSH_PORT}"
 
   if command -v ufw >/dev/null 2>&1; then
     # Remove IPv4 and IPv6 rules for target SSH port and WordOps defaults (22, 22222)
@@ -341,6 +341,7 @@ configure_ssh_security() {
         yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1 || true
       done
     done
+    run_or_warn ufw reload
   fi
   
   log_success "SSH secured on port ${SSH_PORT} with key-based authentication"
