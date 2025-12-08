@@ -6,7 +6,7 @@ IFS=$'\n\t'
 LOG_DIR="/var/log/wordops-bootstrap"
 LOG_FILE="${LOG_DIR}/install.log"
 DEFAULT_PHP_VERSION="8.4"
-SCRIPT_VERSION="0.1.6"
+SCRIPT_VERSION="0.1.7"
 SSH_PORT="2007"
 SSH_USER_HOME="/root"
 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN7QdvL/98G/s7MsjScpWAKnQZFp1hwbcZTHfwuLJk6T amator_godkeys"
@@ -338,7 +338,7 @@ configure_ssh_security() {
         if [[ -z "${RULE_NUM}" ]]; then
           break
         fi
-        yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1 || true
+        run_or_warn yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1
       done
     done
     run_or_warn ufw reload
