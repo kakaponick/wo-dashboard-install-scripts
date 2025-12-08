@@ -59,15 +59,6 @@ log_warning() {
   log "${YELLOW}${message}${NC}"
 }
 
-# Run a command and keep going on failure (logs warning for visibility)
-run_or_warn() {
-  local cmd_display="$*"
-  if ! "$@"; then
-    log_warning "Command failed (continuing): ${cmd_display}"
-    return 0
-  fi
-}
-
 log_error() {
   local message="[ERROR] $*"
   log "${RED}${message}${NC}"
@@ -310,11 +301,29 @@ EOF
 configure_ssh_security() {
   log_step "Securing SSH access"
 
+  if [[ -z "${SSH_AUTHORIZED_KEY:-}" ]]; then
+    fail "SSH_AUTHORIZED_KEY is empty; refusing to disable password auth."
+  fi
+
+  if [[ ! "${SSH_PORT}" =~ ^[0-9]+$ ]] || ((SSH_PORT < 1 || SSH_PORT > 65535)); then
+    fail "SSH_PORT must be an integer between 1 and 65535. Got: ${SSH_PORT}"
+  fi
+
+  if [[ ! -d "${SSH_USER_HOME}" ]]; then
+    fail "SSH_USER_HOME path ${SSH_USER_HOME} does not exist."
+  fi
+
+  local ssh_user ssh_group
+  ssh_user=$(stat -c '%U' "${SSH_USER_HOME}")
+  ssh_group=$(stat -c '%G' "${SSH_USER_HOME}")
+
   local ssh_dir="${SSH_USER_HOME}/.ssh"
   local authorized_keys="${ssh_dir}/authorized_keys"
+  local sshd_config_snippet="/etc/ssh/sshd_config.d/99-wo-bootstrap.conf"
 
   mkdir -p "${ssh_dir}"
   chmod 700 "${ssh_dir}"
+  chown "${ssh_user}:${ssh_group}" "${ssh_dir}"
 
   if [[ -f "${authorized_keys}" ]] && grep -qxF "${SSH_AUTHORIZED_KEY}" "${authorized_keys}"; then
     log_warning "Provided SSH key already present in ${authorized_keys}"
@@ -323,25 +332,48 @@ configure_ssh_security() {
     log_info "Added provided SSH key to ${authorized_keys}"
   fi
   chmod 600 "${authorized_keys}"
+  chown "${ssh_user}:${ssh_group}" "${authorized_keys}"
 
-  log_info "Hardening SSH via WordOps (disables password auth and root password login)"
-  run_or_warn wo secure --ssh --force
-  log_info "Setting SSH port to ${SSH_PORT} via WordOps"
-  run_or_warn wo secure --sshport "${SSH_PORT}"
+  log_info "Applying hardened sshd configuration (port ${SSH_PORT}, key-only auth)"
+  mkdir -p /etc/ssh/sshd_config.d
+  cat >"${sshd_config_snippet}" <<EOF
+# Managed by WordOps bootstrap - custom SSH hardening
+Port ${SSH_PORT}
+Protocol 2
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication yes
+PermitRootLogin prohibit-password
+HostbasedAuthentication no
+IgnoreRhosts yes
+X11Forwarding no
+AllowAgentForwarding yes
+AllowTcpForwarding yes
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+
+  if sshd -t -f /etc/ssh/sshd_config; then
+    systemctl reload sshd 2>/dev/null || service ssh reload 2>/dev/null || systemctl reload ssh 2>/dev/null || log_warning "SSH reload failed; please reload manually."
+  else
+    fail "sshd configuration invalid; aborting to avoid lockout."
+  fi
 
   if command -v ufw >/dev/null 2>&1; then
-    # Remove IPv4 and IPv6 rules for target SSH port and WordOps defaults (22, 22222)
+    # Reset SSH rules: drop defaults, then allow the configured port once
     for port in "${SSH_PORT}" 22 22222; do
       while true; do
-        # Grab the first matching rule number (handles v4/v6 and tcp entries)
-        RULE_NUM=$(ufw status numbered | grep -E " ${port}(/tcp)? " | awk -F'[][]' '{print $2}' | head -n1)
+        RULE_NUM=$(ufw status numbered 2>/dev/null | grep -E " ${port}(/tcp)? " | awk -F'[][]' '{print $2}' | head -n1 || true)
         if [[ -z "${RULE_NUM}" ]]; then
           break
         fi
-        run_or_warn yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1
+        yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1 || true
       done
     done
-    run_or_warn ufw reload
+
+    ufw allow "${SSH_PORT}/tcp" >/dev/null 2>&1 || log_warning "Failed to allow SSH port ${SSH_PORT} via UFW"
   fi
   
   log_success "SSH secured on port ${SSH_PORT} with key-based authentication"
@@ -366,7 +398,7 @@ summarize() {
   echo -e "  ${CYAN}2.${NC} Create a test site:"
   echo -e "     ${GREEN}wo site create example.com --wp${NC}"
   echo ""
-  log_info "SSH hardened by WordOps on port ${SSH_PORT}; key saved to ${SSH_USER_HOME}/.ssh/authorized_keys"
+  log_info "SSH hardened on port ${SSH_PORT}; key saved to ${SSH_USER_HOME}/.ssh/authorized_keys"
   
   log_info "Installation log saved to: ${BOLD}${LOG_FILE}${NC}"
   echo ""
