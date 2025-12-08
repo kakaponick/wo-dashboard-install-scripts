@@ -6,7 +6,10 @@ IFS=$'\n\t'
 LOG_DIR="/var/log/wordops-bootstrap"
 LOG_FILE="${LOG_DIR}/install.log"
 DEFAULT_PHP_VERSION="8.4"
-WO_INSTALLER_URL="https://wops.cc"
+SCRIPT_VERSION="0.1.3"
+SSH_PORT="2007"
+SSH_USER_HOME="/root"
+SSH_AUTHORIZED_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN7QdvL/98G/s7MsjScpWAKnQZFp1hwbcZTHfwuLJk6T amator_godkeys"
 
 # Colors (only if terminal supports it)
 if [[ -t 1 ]]; then
@@ -29,7 +32,7 @@ fi
 
 # Step counter
 STEP_COUNT=0
-TOTAL_STEPS=7
+TOTAL_STEPS=8
 START_TIME=$(date +%s)
 
 # Display colored text to terminal (stdout goes through tee which strips ANSI for log)
@@ -217,10 +220,10 @@ install_wordops() {
     return
   fi
 
-  log_info "Downloading WordOps installer from ${WO_INSTALLER_URL}..."
+  log_info "Downloading WordOps installer from https://wops.cc..."
   local installer
   installer="$(mktemp)"
-  wget -O "${installer}" "${WO_INSTALLER_URL}"
+  wget -O "${installer}" "https://wops.cc"
 
   log_info "Running WordOps installer (this may take several minutes)..."
   bash "${installer}" --force
@@ -296,6 +299,36 @@ EOF
   fi
 }
 
+configure_ssh_security() {
+  log_step "Securing SSH access"
+
+  local ssh_dir="${SSH_USER_HOME}/.ssh"
+  local authorized_keys="${ssh_dir}/authorized_keys"
+
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+
+  if [[ -f "${authorized_keys}" ]] && grep -qxF "${SSH_AUTHORIZED_KEY}" "${authorized_keys}"; then
+    log_warning "Provided SSH key already present in ${authorized_keys}"
+  else
+    echo "${SSH_AUTHORIZED_KEY}" >> "${authorized_keys}"
+    log_info "Added provided SSH key to ${authorized_keys}"
+  fi
+  chmod 600 "${authorized_keys}"
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${SSH_PORT}/tcp" >/dev/null 2>&1 || log_warning "Unable to allow SSH port ${SSH_PORT} in UFW"
+  fi
+
+  log_info "Hardening SSH via WordOps (disables password auth and root password login)"
+  wo secure --ssh --force
+
+  log_info "Setting SSH port to ${SSH_PORT} via WordOps"
+  wo secure --sshport "${SSH_PORT}"
+
+  log_success "SSH secured on port ${SSH_PORT} with key-based authentication"
+}
+
 
 summarize() {
   local elapsed_time
@@ -315,6 +348,7 @@ summarize() {
   echo -e "  ${CYAN}2.${NC} Create a test site:"
   echo -e "     ${GREEN}wo site create example.com --wp${NC}"
   echo ""
+  log_info "SSH hardened by WordOps on port ${SSH_PORT}; key saved to ${SSH_USER_HOME}/.ssh/authorized_keys"
   
   log_info "Installation log saved to: ${BOLD}${LOG_FILE}${NC}"
   echo ""
@@ -325,7 +359,7 @@ main() {
   setup_logging
   
   echo ""
-  log_section "WordOps Automatic Installation for Ubuntu 24"
+  log_section "WordOps Automatic Installation for Ubuntu 24 (v${SCRIPT_VERSION})"
   log_info "This script will install and configure WordOps on your system"
   log_info "Estimated time: 5-15 minutes (depending on system speed)"
   echo ""
@@ -339,6 +373,7 @@ main() {
   install_prerequisites
   install_wordops
   install_stack
+  configure_ssh_security
   harden_nginx_defaults
   summarize
 }
