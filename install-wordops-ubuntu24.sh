@@ -243,7 +243,6 @@ install_stack() {
     fail "WordOps is not installed. Cannot install stack components."
   fi
 
-  log_info "Installing WordOps web stack (Nginx, PHP ${DEFAULT_PHP_VERSION}, MySQL)..."
   local php_flag_version="${DEFAULT_PHP_VERSION//./}"
   local components=(
     "--nginx"
@@ -317,7 +316,17 @@ configure_ssh_security() {
   chmod 600 "${authorized_keys}"
 
   if command -v ufw >/dev/null 2>&1; then
-    ufw allow "${SSH_PORT}/tcp" >/dev/null 2>&1 || log_warning "Unable to allow SSH port ${SSH_PORT} in UFW"
+    # Remove IPv4 and IPv6 rules for target SSH port and WordOps defaults (22, 22222)
+    for port in "${SSH_PORT}" 22 22222; do
+      while true; do
+        # Grab the first matching rule number (handles v4/v6 and tcp entries)
+        RULE_NUM=$(ufw status numbered | grep -E " ${port}(/tcp)? " | awk -F'[][]' '{print $2}' | head -n1)
+        if [[ -z "${RULE_NUM}" ]]; then
+          break
+        fi
+        yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1 || true
+      done
+    done
   fi
 
   log_info "Hardening SSH via WordOps (disables password auth and root password login)"
