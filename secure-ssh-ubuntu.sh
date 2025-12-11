@@ -143,11 +143,12 @@ EOF
         if [[ -z "${RULE_NUM}" ]]; then
           break
         fi
+        log_info "Deleting UFW rule #${RULE_NUM} for port ${port}"
         yes | ufw delete "${RULE_NUM}" >/dev/null 2>&1 || true
       done
     done
 
-    ufw allow "${SSH_PORT}/tcp" >/dev/null 2>&1 || log_warn "Failed to allow SSH port ${SSH_PORT} via UFW"
+    ufw allow "${SSH_PORT}/tcp" comment 'SSH Access' >/dev/null 2>&1 || log_warn "Failed to allow SSH port ${SSH_PORT} via UFW"
   fi
 
   log_success "SSH secured on port ${SSH_PORT} with key-based authentication"

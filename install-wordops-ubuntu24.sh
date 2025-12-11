@@ -428,6 +428,13 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 EOF
 
+  # Ensure privilege separation runtime dir exists before config test
+  if [[ ! -d /run/sshd ]]; then
+    mkdir -p /run/sshd
+    chmod 755 /run/sshd
+    chown root:root /run/sshd
+  fi
+
   if sshd -t -f /etc/ssh/sshd_config; then
     local ssh_socket_unit="ssh.socket"
     local ssh_service_unit="ssh.service"
