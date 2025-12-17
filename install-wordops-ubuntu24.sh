@@ -32,7 +32,7 @@ fi
 
 # Step counter
 STEP_COUNT=0
-TOTAL_STEPS=8
+TOTAL_STEPS=9
 START_TIME=$(date +%s)
 
 # Display colored text to terminal (stdout goes through tee which strips ANSI for log)
@@ -365,6 +365,64 @@ EOF
   log_success "Appended sitemap rewrite rules to ${conf}"
 }
 
+apply_fastcgi_defaults() {
+  log_step "Applying Nginx FastCGI defaults"
+
+  if ! command -v nginx >/dev/null 2>&1; then
+    log_warning "Nginx is not installed; skipping FastCGI defaults."
+    return
+  fi
+
+  local fastcgi_conf="/etc/nginx/conf.d/fastcgi.conf"
+  local managed_marker="# Managed by WordOps bootstrap FastCGI defaults"
+
+  mkdir -p /etc/nginx/conf.d
+
+  if [[ -f "${fastcgi_conf}" ]]; then
+    if grep -Fq "${managed_marker}" "${fastcgi_conf}"; then
+      log_info "Updating existing managed FastCGI config at ${fastcgi_conf}"
+    else
+      local backup="${fastcgi_conf}.bak-$(date +%s)"
+      cp "${fastcgi_conf}" "${backup}"
+      log_warning "Existing FastCGI config detected; backed up to ${backup} and applying managed defaults."
+    fi
+  else
+    log_info "Creating FastCGI defaults at ${fastcgi_conf}"
+  fi
+
+  cat >"${fastcgi_conf}" <<'EOF'
+# Managed by WordOps bootstrap FastCGI defaults
+# FastCGI cache path and storage settings
+fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=30d max_size=1g;
+
+fastcgi_cache_key "$scheme$request_method$host$request_uri";
+fastcgi_cache_use_stale error timeout invalid_header updating http_500 http_503;
+
+fastcgi_cache_lock on;
+fastcgi_cache_lock_age 10s;
+fastcgi_cache_lock_timeout 10s;
+
+fastcgi_cache_methods GET HEAD;
+fastcgi_cache_background_update on;
+
+fastcgi_cache_valid 200 90d;
+fastcgi_cache_valid 301 302 1d;
+fastcgi_cache_valid 404 12h;
+fastcgi_cache_valid any 1h;
+
+fastcgi_buffers 16 16k;
+fastcgi_buffer_size 32k;
+
+fastcgi_param SERVER_NAME $http_host;
+fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
+
+fastcgi_keep_conn on;
+fastcgi_socket_keepalive on;
+EOF
+
+  log_success "Nginx FastCGI defaults written to /etc/nginx/conf.d/fastcgi.conf"
+}
+
 configure_nginx_defaults() {
   log_step "Configuring Nginx default site"
 
@@ -553,6 +611,7 @@ main() {
   install_wordops
   configure_wordops_php_version
   install_stack
+  apply_fastcgi_defaults
   configure_ssh_security
   configure_nginx_defaults
 
