@@ -420,7 +420,12 @@ fastcgi_keep_conn on;
 fastcgi_socket_keepalive on;
 EOF
 
-  log_success "Nginx FastCGI defaults written to /etc/nginx/conf.d/fastcgi.conf"
+  if nginx -t; then
+    systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || log_warning "Nginx reload failed; please reload manually."
+    log_success "Nginx FastCGI defaults written to /etc/nginx/conf.d/fastcgi.conf"
+  else
+    fail "Nginx FastCGI config test failed. Check ${LOG_FILE} for details."
+  fi
 }
 
 configure_nginx_defaults() {
